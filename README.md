@@ -1,4 +1,4 @@
-
+Author: Jacqueline Carroll 
 # Human exposure survey data analysis
 
 The purpose of this project is to analyze the fish consumption survey data for each season. Points of interest are demographic information, species consumed & self reported frequency. Data is manually cleaned in excel, further cleaned in R, and utilized in exploratory data analysis, as well as statistical comparisons across seasons.
