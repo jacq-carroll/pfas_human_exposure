@@ -2,9 +2,20 @@
 # date created: 27 July 2025
 # description: the purpose of this script is to do a determinist dose calculation
 
-library(dplyr)
-library(tidyr)
+# list required packages 
+required_packages_install <- c("dplyr",
+                               "tidyr")
+# load required packages 
+for (package in required_packages_install) {
+  if (!require(package, character.only = TRUE)) {
+    install.packages(package, dependencies = TRUE)
+  }
+  library(package, character.only = TRUE)
+}
 
+# source function script 
+source("r_code/functions.R")
+# read in output files from weighted_calcs.R & survey data
 species_means <- read.csv("data/weighted_means_for_dc.csv")
 
 all_pfas <- read.csv("data/eco_and_pfas_12comps.csv")
@@ -12,7 +23,7 @@ all_pfas <- read.csv("data/eco_and_pfas_12comps.csv")
 survey <- read.csv("data/survey_use.csv")
 
 # in the clean_qualtrics_data the weekly numbers are still weekly ie: 1, 2, 3, less than and greater than 
-#   did work # TO: DO CHECK THIS COLUMN TO MAKE SURE IT INCLUDES EVERYTHING 
+#   did work 
 all_numeric_columns <- c("bodyweight",
                          "atlantic_croaker",
                          "black_drum",
@@ -70,11 +81,11 @@ all_numeric_columns <- c("bodyweight",
                          "oyster...105",
                          "oyster_quantity",
                          "other...108")
+# make all of these characters 
 survey <- survey %>%
   mutate(across(all_of(all_numeric_columns), as.character))
-str(input_file[, all_of(all_numeric_columns)])
 
-# redo this for some reason the cleaning dataset did not UGH 
+# redo this for some reason the cleaning script did not UGH 
 survey <- survey %>% 
   mutate(across(all_of(all_numeric_columns), ~ case_when(
     . == "less than 1 per week" ~ 0.5/7,
@@ -90,7 +101,6 @@ survey <- survey %>%
   )))
 
 # create total wild caught fish consumption column 
-# TO DO CHECK THIS COLUMN 
 wc_columns <- c(
   "atlantic_croaker", "black_drum", "black_sea_bass", "blue_crab", "bluefish",
   "blue_catfish", "channel_catfish", "cobia", "dolphinfish...40", "hard_clam",
@@ -100,102 +110,26 @@ wc_columns <- c(
   "yellowfin_tuna", "other...62"
 )
 
-# create column for how often they eat each species per day
+# create column for how often subjects eat each species per day
 survey <- survey %>%
   rowwise() %>%
   mutate(total_wc = sum(c_across(all_of(wc_columns)), na.rm = TRUE)) %>%
   ungroup()
 
-
-# scaled-species specific consumption calculation, need to make sure all are here 
-# self reported meal frequency divided by the total number of species 
+# Scaled-species specific consumption calculation, need to make sure all are here 
+  # self reported meal frequency divided by the total number of species 
 survey <- survey %>%
   mutate(across(all_of(wc_columns),
                 ~ (.x * sr_meal_freq_wc) / total_wc, # .x = species specific, sr_meal_freq = self reported total, total_wc = actual total 
                 .names = "{.col}_sf"))
 
 # time for dose calculation 
-# need to put survey in long format 
-calculate_dose <- function(survey, weighted_means_species, 
-                           portion_col = "wild_caught_finfish_typical_meal_size", 
-                           bw_col = "bodyweight") {
-  
-  # ID scaled columns (created above)
-  sf_cols <- grep("_sf$", names(survey), value = TRUE)
-  
-  # Make survey long format 
-  survey_long <- survey %>%
-    pivot_longer(
-      cols = all_of(sf_cols),
-      names_to = "common.name",
-      values_to = "scaled_frequency"
-    ) %>%
-    mutate(
-      common.name = gsub("_sf$", "", common.name),
-      common.name = gsub("\\.\\.\\d+$", "", common.name),  # remove ...40 etc.
-      common.name = gsub("_", " ", common.name),
-      common.name = gsub("\\.$", "", common.name),         # remove trailing dot
-      common.name = trimws(tolower(common.name))
-    )
-  
-  # Standardize common names -- make lowercase & trim white space 
-  weighted_means_species <- weighted_means_species %>%
-    mutate(common.name = trimws(tolower(common.name)))
-  
-  # Warning in case some species are unmatched 
-  unmatched_species <- setdiff(unique(survey_long$common.name), 
-                               unique(weighted_means_species$common.name))
-  if (length(unmatched_species) > 0) {
-    warning(
-      "The following species from survey have no match in weighted_means_species: ",
-      paste(unmatched_species, collapse = ", ")
-    )
-  }
-  
-  # Join survey & weighted means 
-  dose_data <- survey_long %>%
-    left_join(
-      weighted_means_species %>% dplyr::select(common.name, standard_name, weighted_mean),
-      by = "common.name"
-    )
-  
-  # Actual dose calculation per SPECIES & COMPOUND per individual (human subject)
-  dose_data <- dose_data %>%
-    mutate(dose_species = (scaled_frequency * .data[[portion_col]] * weighted_mean) / .data[[bw_col]]) #convert weighted means from ug to ng 
-  
-  dose_by_compound <- dose_data %>% 
-    group_by(response_ID, standard_name) %>% 
-    summarise(
-      dose = sum(dose_species, na.rm = TRUE),
-      .groups = "drop"
-    )
-  
-  # Sum species_dose into total_dose 
-  total_dose <- dose_data %>%
-    group_by(response_ID) %>%
-    summarise(
-      total_dose = sum(dose_species, na.rm = TRUE),
-      N = sum(!is.na(scaled_frequency) & scaled_frequency > 0),
-      .groups = "drop"
-    )
-  
-  
-  return(list(
-    dose_data = dose_data,   # dose per species
-    total_dose = total_dose,  # summed dose per individual
-    compound_dose = dose_by_compound
-  ))
-}
-
-# checking out common name 
-unique(dose_profile$dose_data$common.name)
-
 # calculate dose on filtered surveys
 # pilot data removed
 # filter survey data to remove before 8/4/24 (want 8/3 removed)
 survey_pilot_rmvd <- survey %>% 
   filter(survey$date > "2024-08-04") # anything after Aug 4, 2024
-# filter based on part of bay 
+# filter based on part of bay, to do  
 
 # calculate dose 
 dose_prof_pilot_rmvd <- calculate_dose(survey = survey_pilot_rmvd, weighted_means_species = species_means)
